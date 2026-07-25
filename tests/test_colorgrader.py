@@ -1,0 +1,230 @@
+"""Tests for the colour maths and file writers.
+
+These deliberately avoid needing real video: the pieces that talk to ffmpeg are
+thin, and the parts worth pinning down are the colour transforms and the LUT
+file format.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from colorgrader.lut import read_cube, sample_lattice, write_cdl, write_cube
+from colorgrader.match import (
+    METHODS, build_transform, identity_transform, match_error,
+)
+from colorgrader.report import encode_png
+from colorgrader.stats import (
+    analyse, detect_content_box, lab_to_rgb, pick_reference, rgb_to_lab,
+)
+
+
+def make_frames(n=6, h=48, w=64, seed=0, gain=(1.0, 1.0, 1.0), bias=0.0):
+    """Synthetic footage with a controllable colour cast."""
+    rng = np.random.default_rng(seed)
+    base = rng.random((n, h, w, 3)) * 0.6 + 0.2
+    base = base * np.array(gain) + bias
+    return np.clip(base * 255, 0, 255).astype(np.uint8)
+
+
+# --------------------------------------------------------------------------
+# Colour space round trips
+# --------------------------------------------------------------------------
+
+def test_lab_round_trip_is_lossless_enough():
+    rng = np.random.default_rng(1)
+    rgb = rng.random((5000, 3))
+    assert np.allclose(lab_to_rgb(rgb_to_lab(rgb)), rgb, atol=1e-4)
+
+
+def test_lab_known_values():
+    # Pure white sits at L=100 with no chroma; black at L=0.
+    white = rgb_to_lab(np.array([[1.0, 1.0, 1.0]]))[0]
+    assert white[0] == pytest.approx(100.0, abs=0.1)
+    assert np.allclose(white[1:], 0.0, atol=0.05)
+    assert rgb_to_lab(np.array([[0.0, 0.0, 0.0]]))[0][0] == pytest.approx(0.0, abs=1e-6)
+
+
+# --------------------------------------------------------------------------
+# Letterbox detection
+# --------------------------------------------------------------------------
+
+def test_detect_content_box_finds_letterbox():
+    frames = make_frames(h=100, w=100)
+    frames[:, :20, :, :] = 0     # top bar
+    frames[:, -15:, :, :] = 0    # bottom bar
+    top, bottom, left, right = detect_content_box(frames)
+    assert (top, bottom) == (20, 85)
+    assert (left, right) == (0, 100)
+
+
+def test_detect_content_box_leaves_clean_frames_alone():
+    frames = make_frames(h=40, w=50)
+    assert detect_content_box(frames) == (0, 40, 0, 50)
+
+
+def test_detect_content_box_ignores_all_black_clip():
+    frames = np.zeros((3, 40, 50, 3), np.uint8)
+    assert detect_content_box(frames) == (0, 40, 0, 50)
+
+
+# --------------------------------------------------------------------------
+# Matching
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("method", METHODS)
+def test_matching_reduces_difference(method):
+    warm = analyse("warm", make_frames(seed=2, gain=(1.25, 1.0, 0.75)))
+    neutral = analyse("neutral", make_frames(seed=2))
+
+    transform = build_transform(warm, neutral, method=method, strength=1.0)
+    err = match_error(warm, neutral, transform)
+    assert err["after"] < err["before"], f"{method} made the match worse"
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_transform_stays_in_range(method):
+    a = analyse("a", make_frames(seed=3, gain=(1.3, 0.9, 0.7)))
+    b = analyse("b", make_frames(seed=4, bias=0.1))
+    out = build_transform(a, b, method=method).apply(
+        np.random.default_rng(5).random((2000, 3))
+    )
+    assert out.min() >= 0.0 and out.max() <= 1.0
+
+
+def test_matching_a_clip_to_itself_is_near_identity():
+    st = analyse("same", make_frames(seed=6))
+    out = build_transform(st, st, method="cdl", strength=1.0).apply(st.pixels)
+    assert np.abs(out - st.pixels).mean() < 0.02
+
+
+def test_strength_scales_the_correction():
+    src = analyse("src", make_frames(seed=7, gain=(1.4, 1.0, 0.7)))
+    ref = analyse("ref", make_frames(seed=7))
+    probe = np.full((100, 3), 0.5)
+
+    full = build_transform(src, ref, strength=1.0).apply(probe)
+    half = build_transform(src, ref, strength=0.5).apply(probe)
+    none = build_transform(src, ref, strength=0.0).apply(probe)
+
+    assert np.allclose(none, probe, atol=1e-6)
+    assert np.allclose(half, (probe + full) / 2, atol=1e-6)
+
+
+def test_identity_transform_changes_nothing():
+    probe = np.random.default_rng(8).random((500, 3))
+    assert np.allclose(identity_transform().apply(probe), probe)
+
+
+def test_unknown_method_is_rejected():
+    st = analyse("x", make_frames(seed=9))
+    with pytest.raises(ValueError, match="Unknown method"):
+        build_transform(st, st, method="nonsense")
+
+
+def test_pick_reference_chooses_the_middle_clip():
+    # Three exposures: the middle one needs the least correction overall.
+    clips = [
+        analyse("dark", make_frames(seed=10, gain=(0.55, 0.55, 0.55))),
+        analyse("mid", make_frames(seed=10)),
+        analyse("bright", make_frames(seed=10, bias=0.3)),
+    ]
+    assert clips[pick_reference(clips)].name == "mid"
+
+
+def test_pick_reference_handles_single_clip():
+    assert pick_reference([analyse("only", make_frames(seed=11))]) == 0
+
+
+# --------------------------------------------------------------------------
+# LUT export
+# --------------------------------------------------------------------------
+
+def test_cube_has_correct_size_and_range(tmp_path):
+    src = analyse("s", make_frames(seed=12, gain=(1.2, 1.0, 0.8)))
+    ref = analyse("r", make_frames(seed=12))
+    path = write_cube(build_transform(src, ref), tmp_path / "t.cube", size=17)
+
+    size, values = read_cube(path)
+    assert size == 17
+    assert values.shape == (17**3, 3)
+    assert values.min() >= 0.0 and values.max() <= 1.0
+
+
+def test_cube_ordering_is_red_fastest(tmp_path):
+    """The .cube spec has red varying fastest. Getting this backwards swaps the
+    red and blue channels of every graded shot, so pin it down explicitly."""
+    size = 5
+    # A transform that reads only the red input, so ordering is observable.
+    marker = identity_transform()
+    marker.apply_fn = lambda rgb: np.stack(
+        [rgb[..., 0], np.zeros_like(rgb[..., 0]), np.zeros_like(rgb[..., 0])],
+        axis=-1,
+    )
+    _, values = read_cube(write_cube(marker, tmp_path / "o.cube", size=size))
+
+    # First `size` entries must sweep red from 0 to 1.
+    assert np.allclose(values[:size, 0], np.linspace(0, 1, size), atol=1e-6)
+    # And entry `size` wraps back to red=0 as green steps up.
+    assert values[size, 0] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_sample_lattice_matches_direct_evaluation():
+    src = analyse("s", make_frames(seed=13, gain=(0.8, 1.1, 1.3)))
+    ref = analyse("r", make_frames(seed=13))
+    tf = build_transform(src, ref)
+
+    values = sample_lattice(tf, size=9)
+    # Corner at (r=1, g=0, b=0) is index 8 with red varying fastest.
+    assert np.allclose(values[8], tf.apply(np.array([1.0, 0.0, 0.0])), atol=1e-6)
+
+
+def test_bad_lut_size_is_rejected():
+    with pytest.raises(ValueError, match="between 2 and 128"):
+        sample_lattice(identity_transform(), size=1)
+
+
+def test_cdl_written_for_correction_and_skipped_for_reference(tmp_path):
+    src = analyse("s", make_frames(seed=14, gain=(1.3, 1.0, 0.7)))
+    ref = analyse("r", make_frames(seed=14))
+
+    written = write_cdl(build_transform(src, ref), tmp_path / "a.cdl", "shot_a")
+    assert written is not None
+    text = written.read_text()
+    assert "<Slope>" in text and "shot_a" in text and "Saturation" in text
+
+    skipped = write_cdl(identity_transform(), tmp_path / "b.cdl", "ref")
+    assert skipped is None and not (tmp_path / "b.cdl").exists()
+
+
+def test_cdl_id_is_xml_escaped(tmp_path):
+    src = analyse("s", make_frames(seed=15, gain=(1.2, 1.0, 0.9)))
+    ref = analyse("r", make_frames(seed=15))
+    path = write_cdl(build_transform(src, ref), tmp_path / "c.cdl", 'a&b<c"')
+    assert "&amp;" in path.read_text() and "a&b<" not in path.read_text()
+
+
+# --------------------------------------------------------------------------
+# Report
+# --------------------------------------------------------------------------
+
+def test_png_encoder_produces_a_valid_file():
+    png = encode_png(make_frames(n=1, h=8, w=12)[0])
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert b"IHDR" in png and b"IDAT" in png and png.endswith(b"IEND\xae\x42\x60\x82")
+
+
+def test_png_round_trips_through_a_real_decoder():
+    """Verify against an independent decoder rather than trusting our own writer."""
+    zlib_png = pytest.importorskip("PIL.Image", reason="Pillow not installed")
+    import io
+
+    original = make_frames(n=1, h=16, w=24, seed=16)[0]
+    decoded = np.array(zlib_png.open(io.BytesIO(encode_png(original))).convert("RGB"))
+    assert np.array_equal(decoded, original)
