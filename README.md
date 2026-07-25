@@ -98,6 +98,9 @@ Full step-by-step for both apps lands in `HOW_TO_USE.md` next to the LUTs.
 # Choose the clip everything else matches, instead of letting it pick
 colorgrade match footage/ --reference hero_shot.mov
 
+# Match to a hero clip that lives outside the folder (great for batches)
+colorgrade match footage/ --reference /path/to/hero.mov
+
 # Ease off if the match is too aggressive (default 0.85)
 colorgrade match footage/ --strength 0.6
 
@@ -153,6 +156,32 @@ Those clips are all derived from one source render, so the comparison is a true
 per-pixel measure rather than the anchor metric the tool tunes against. Take it
 as a rough guide to each method's character, not a ranking — your footage does
 not have identical content across shots.
+
+## Matching a lot of clips to one hero
+
+Each clip's correction depends only on that clip and the reference — never on
+the other clips in the run. So matching in batches to a fixed hero clip gives
+**byte-identical** LUTs to matching everything at once; how you split the work
+does not change the result.
+
+Point `--reference` at a hero clip that lives *outside* the folder and it never
+has to be copied into each batch:
+
+```bash
+# one clip, or a folder, or many folders — all matched to the same hero
+colorgrade match batch_01/ -r /footage/hero.mov -o out/batch_01
+colorgrade match batch_02/ -r /footage/hero.mov -o out/batch_02
+# ...
+```
+
+Give each batch its own `-o` so their reports and Resolve scripts don't
+overwrite each other. (You can also just point it at the whole folder in one
+go — a couple hundred clips takes a few minutes.)
+
+One thing this does *not* fix: if your clips span genuinely different scenes or
+lighting, one hero can't be right for all of them. Matching neutralises each
+clip toward the hero, so a shot lit differently will be dragged toward the
+hero's look. Use one hero per lighting setup — a folder (and a hero) per scene.
 
 ## Why `--strength` defaults to 0.85
 

@@ -372,6 +372,39 @@ def test_browse_endpoint_surfaces_picker_error():
     assert "folder path" in _json.loads(handler.wfile.getvalue())["error"]
 
 
+from colorgrader import cli  # noqa: E402
+
+
+def test_resolve_reference_matches_an_input_by_name_or_stem():
+    stats = [analyse("neutral.mp4", make_frames(seed=1)),
+             analyse("warm.mp4", make_frames(seed=2))]
+    infos = [None, None]
+    assert cli._resolve_reference(stats, infos, "warm.mp4", "ff", None, 12, True) == 1
+    assert cli._resolve_reference(stats, infos, "warm", "ff", None, 12, True) == 1
+
+
+def test_resolve_reference_prepends_an_external_hero(tmp_path, monkeypatch):
+    stats = [analyse("a.mp4", make_frames(seed=3))]
+    infos = ["a-info"]
+    hero = tmp_path / "hero.mp4"
+    hero.write_bytes(b"stub")  # just needs to exist; decode is monkeypatched
+    monkeypatch.setattr(cli, "probe", lambda *a, **k: "hero-info")
+    monkeypatch.setattr(cli, "grab_frames", lambda *a, **k: make_frames(seed=9))
+
+    idx = cli._resolve_reference(stats, infos, str(hero), "ff", None, 12, True)
+    assert idx == 0                     # external ref goes to the front
+    assert stats[0].name == "hero.mp4"  # and everything else shifts down
+    assert stats[1].name == "a.mp4"
+    assert infos[0] == "hero-info"
+
+
+def test_resolve_reference_rejects_unknown_name():
+    stats = [analyse("a.mp4", make_frames(seed=4)),
+             analyse("b.mp4", make_frames(seed=5))]
+    with pytest.raises(SystemExit, match="neither"):
+        cli._resolve_reference(stats, [None, None], "nope.mp4", "ff", None, 12, True)
+
+
 def test_index_html_is_self_contained():
     # No external origins - the GUI must work offline on an editing machine.
     assert "<title>colorgrader</title>" in INDEX_HTML

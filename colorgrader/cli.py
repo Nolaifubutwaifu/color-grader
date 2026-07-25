@@ -45,16 +45,40 @@ def _load_clips(
     return infos, stats
 
 
-def _resolve_reference(stats: list[ClipStats], requested: str | None) -> int:
+def _resolve_reference(
+    stats: list[ClipStats], infos: list[ClipInfo], requested: str | None,
+    ffmpeg_path: str, ffprobe_path: str | None, frames: int, quiet: bool,
+) -> int:
+    """Return the index of the reference clip in `stats`.
+
+    The reference may be one of the inputs (matched by name), or an external
+    clip that lives outside the batch - in which case it is analysed and
+    prepended to `stats`/`infos` in place, so a fixed hero clip can anchor
+    batch after batch without being copied into each folder.
+    """
     if requested is None:
         return pick_reference(stats)
+
     want = Path(requested).name.lower()
     for i, s in enumerate(stats):
         if s.name.lower() == want or Path(s.name).stem.lower() == Path(want).stem:
             return i
+
+    external = Path(requested).expanduser()
+    if external.is_file():
+        try:
+            info = probe(external, ffmpeg_path, ffprobe_path)
+            sampled = grab_frames(info, ffmpeg_path, count=frames)
+        except FFmpegError as exc:
+            raise SystemExit(f"Could not read reference clip {requested!r}: {exc}")
+        stats.insert(0, analyse(external.name, sampled))
+        infos.insert(0, info)
+        _log(f"external reference: {external.name}", quiet)
+        return 0
+
     raise SystemExit(
-        f"Reference clip {requested!r} is not among the inputs. Available: "
-        + ", ".join(s.name for s in stats)
+        f"Reference {requested!r} is neither one of the inputs nor a file that "
+        f"exists. Inputs: " + ", ".join(s.name for s in stats)
     )
 
 
@@ -66,17 +90,21 @@ def cmd_match(args: argparse.Namespace) -> int:
     paths = collect_inputs(args.inputs)
     if not paths:
         raise SystemExit("No video files found in the given paths.")
-    if len(paths) < 2:
-        raise SystemExit(
-            "Matching needs at least two clips - one to match, one to match to. "
-            "Use `colorgrade analyze` to inspect a single clip."
-        )
 
     infos, stats = _load_clips(paths, ffmpeg_path, ffprobe_path, args.frames, quiet)
-    if len(stats) < 2:
-        raise SystemExit("Fewer than two clips could be decoded; nothing to match.")
+    if not stats:
+        raise SystemExit("No clips could be decoded.")
 
-    ref_index = _resolve_reference(stats, args.reference)
+    ref_index = _resolve_reference(
+        stats, infos, args.reference, ffmpeg_path, ffprobe_path, args.frames, quiet
+    )
+    # With an external reference a single input clip is a valid batch; without
+    # one we need at least two clips so there is something to match against.
+    if len(stats) < 2:
+        raise SystemExit(
+            "Nothing to match: give at least two clips, or one clip plus an "
+            "external --reference to match it to."
+        )
     reference = stats[ref_index]
     _log(f"\nreference: {reference.name}", quiet)
     _log(f"method: {args.method}  strength: {args.strength:.2f}\n", quiet)
