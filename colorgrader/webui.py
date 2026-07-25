@@ -160,9 +160,10 @@ INDEX_HTML = r"""<!doctype html>
   <div class="ctl">
     <label>Method</label>
     <div class="seg" id="method">
-      <button data-m="cdl" class="on">CDL</button>
-      <button data-m="hist">Histogram</button>
-      <button data-m="reinhard">Reinhard</button>
+      <button data-m="wb" title="White balance only - best for mixed indoor/outdoor lighting">White balance</button>
+      <button data-m="cdl" class="on" title="Full match: black/mid/white per channel + saturation">CDL</button>
+      <button data-m="hist" title="Match the full tonal distribution - strongest, can band">Histogram</button>
+      <button data-m="reinhard" title="Lab mean/spread transfer">Reinhard</button>
     </div>
   </div>
   <div class="ctl">

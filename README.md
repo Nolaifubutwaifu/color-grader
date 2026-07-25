@@ -115,13 +115,22 @@ colorgrade analyze footage/
 |---|---|---|
 | `--reference` | most typical clip | Clip to match everything to |
 | `--strength` | `0.85` | 0 = untouched, 1 = full match |
-| `--method` | `cdl` | `cdl`, `reinhard`, or `hist` |
+| `--method` | `cdl` | `wb`, `cdl`, `reinhard`, or `hist` |
 | `--frames` | `12` | Frames sampled per clip |
 | `--lut-size` | `33` | 3D LUT lattice size |
 | `--render` | off | Also bake out video files |
 | `--codec` | `h264` | `h264`, `h265`, or `prores` |
 
-### The three methods
+### The four methods
+
+**`wb`** corrects white balance and exposure only — a per-channel gain that
+neutralises each clip's colour cast onto the reference, leaving contrast and
+saturation alone. It is the **content-robust** one: because it only moves the
+neutral point, it can balance clips that contain *different things* (a shot of
+the street outside against a shot of the styling chair inside) without
+distorting either. This is the method for **mixed indoor/outdoor lighting**.
+Its trade-off is that it does not touch contrast, so clips that differ in
+contrast as well as colour are only half-fixed — follow with `cdl` if needed.
 
 **`cdl`** (default) matches black point, midtone and white point per channel,
 then aligns saturation. The most predictable of the three, and the only one
@@ -156,6 +165,40 @@ Those clips are all derived from one source render, so the comparison is a true
 per-pixel measure rather than the anchor metric the tool tunes against. Take it
 as a rough guide to each method's character, not a ranking — your footage does
 not have identical content across shots.
+
+## Mixed lighting — a social feed shot indoors and out
+
+When some clips were shot inside (warm) and some outside (cool) and you want the
+whole set to feel like one cohesive feed, this is the recipe:
+
+```bash
+colorgrade gui /footage        # or: colorgrade match /footage -r hero.mov --method wb
+```
+
+1. **Pick a hero that has the look you want the feed to have** — usually a
+   well-lit indoor clip with flattering skin and hair tones. Everything else
+   gets pulled toward it.
+2. **Use the `wb` (white balance) method.** It neutralises the indoor/outdoor
+   cast without reshaping the image, so it survives the fact that an outdoor
+   clip contains different things than an indoor one. The full-match methods
+   (`cdl`, `hist`) tend to *overcook* clips whose content differs a lot from
+   the hero — pushing saturation and contrast to force a match that colour
+   alone should make.
+3. **Judge by eye, not by the ΔE number.** An outdoor clip will always show a
+   higher residual ΔE than an indoor one, because it genuinely contains
+   different things — that residual is *content*, not colour, and no colour
+   correction removes it. What matters is whether the whites and skin now read
+   the same warmth across clips. The report's side-by-side is there for exactly
+   this.
+4. **Dial back the odd stubborn clip.** If one outdoor shot still looks pushed,
+   drop its **per-clip strength override** in the GUI (or lower global
+   `--strength`) until it sits right, rather than forcing a full match.
+5. Optional: once everything is *balanced*, add one creative look on top in
+   Premiere (a single Lumetri look across all clips) to give the feed its brand
+   feel. Balance first, look second.
+
+Skin and hair are the subject of a salon feed, so that is what to watch in the
+report: if faces read consistently warm across inside and outside, you are done.
 
 ## Matching a lot of clips to one hero
 

@@ -13,7 +13,7 @@ import numpy as np
 
 from .stats import ClipStats, LUMA_709, lab_to_rgb, luma, rgb_to_lab
 
-METHODS = ("cdl", "reinhard", "hist")
+METHODS = ("wb", "cdl", "reinhard", "hist")
 
 
 @dataclass
@@ -122,6 +122,64 @@ def _cdl_transform(src: ClipStats, ref: ClipStats) -> Transform:
     )
 
 
+def _neutral_estimate(px: np.ndarray) -> np.ndarray:
+    """Estimate a clip's illuminant (its colour cast) as a per-channel level.
+
+    A plain grey-world average is thrown off by any large block of saturated
+    colour - a red feature wall, a green hedge behind an outdoor shot. So we
+    weight each pixel toward how near-neutral and well-exposed it is: the walls,
+    skin, hair and daylight that actually carry the white balance dominate, and
+    a colourful background barely counts. That is what makes this robust when
+    two clips contain different things.
+    """
+    mx = px.max(axis=1)
+    mn = px.min(axis=1)
+    sat = (mx - mn) / (mx + 1e-6)
+    lum = px @ LUMA_709
+    weight = np.exp(-((sat / 0.35) ** 2))          # favour near-neutral pixels
+    weight = weight * (lum > 0.08) * (lum < 0.97)   # drop crushed and clipped
+    total = weight.sum()
+    if total < 1e-3:
+        return px.mean(axis=0)                       # nothing neutral; fall back
+    return (px * weight[:, None]).sum(axis=0) / total
+
+
+def _wb_transform(src: ClipStats, ref: ClipStats) -> Transform:
+    """White-balance + exposure match only: a per-channel gain (von Kries).
+
+    This is the content-robust method. It corrects the colour cast and overall
+    brightness - the difference between a warm indoor clip and a cool outdoor
+    one - without reshaping the tonal distribution or touching saturation. That
+    restraint is the point: the distribution-matching methods overcook when two
+    clips contain different things, because they try to force one image's
+    histogram onto another's. This only moves the neutral point, so a shot of
+    the street outside can be balanced to a shot of the styling chair inside
+    without either being distorted.
+    """
+    src_illum = _neutral_estimate(src.pixels_float)
+    ref_illum = _neutral_estimate(ref.pixels_float)
+    gain = np.clip(ref_illum / np.maximum(src_illum, 1e-4), 0.4, 2.5)
+
+    def fn(rgb: np.ndarray) -> np.ndarray:
+        return rgb * gain
+
+    # A pure gain is exactly a CDL slope, so this still exports as ASC CDL and
+    # shows up on the gain wheels in the report.
+    cdl = CDLValues(
+        slope=gain, offset=np.zeros(3), power=np.ones(3), saturation=1.0,
+    )
+    return Transform(
+        name="wb",
+        apply_fn=fn,
+        description=(
+            "White-balance match: a per-channel gain that neutralises each "
+            "clip's colour cast and exposure onto the reference, leaving "
+            "contrast and saturation untouched. Best for mixed lighting."
+        ),
+        cdl=cdl,
+    )
+
+
 def _reinhard_transform(src: ClipStats, ref: ClipStats) -> Transform:
     """Classic Reinhard mean/std transfer, done in Lab.
 
@@ -181,6 +239,7 @@ def _hist_transform(src: ClipStats, ref: ClipStats) -> Transform:
 
 
 _BUILDERS = {
+    "wb": _wb_transform,
     "cdl": _cdl_transform,
     "reinhard": _reinhard_transform,
     "hist": _hist_transform,
