@@ -115,7 +115,6 @@ class ClipStats:
     percentiles: np.ndarray   # (3, 3) rows = shadow/mid/highlight, cols = RGB
     lab_mean: np.ndarray      # (3,)
     lab_std: np.ndarray       # (3,)
-    cdf: np.ndarray           # (3, 256) cumulative histogram per channel
     saturation: float         # mean Lab chroma
     exposure: float           # mean Rec.709 luma
     crop: tuple[int, int, int, int]
@@ -165,11 +164,6 @@ def analyse(name: str, frames: np.ndarray, max_pixels: int = 400_000) -> ClipSta
     lab = rgb_to_lab(rgb)
     chroma = np.hypot(lab[:, 1], lab[:, 2])
 
-    cdf = np.empty((3, 256))
-    for c in range(3):
-        hist = np.bincount(flat[:, c], minlength=256).astype(np.float64)
-        cdf[c] = np.cumsum(hist) / max(hist.sum(), 1.0)
-
     # Middle sample is usually more representative than the first frame.
     thumb = cropped[len(cropped) // 2]
 
@@ -179,7 +173,6 @@ def analyse(name: str, frames: np.ndarray, max_pixels: int = 400_000) -> ClipSta
         percentiles=percentiles,
         lab_mean=lab.mean(axis=0),
         lab_std=lab.std(axis=0) + 1e-6,
-        cdf=cdf,
         saturation=float(chroma.mean()),
         exposure=float((rgb * LUMA_709).sum(axis=1).mean()),
         crop=(top, bottom, left, right),

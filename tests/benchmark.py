@@ -23,10 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from colorgrader.cli import main as cli_main
 from colorgrader.ffmpeg import find_ffmpeg
+from colorgrader.match import METHODS
 from colorgrader.stats import rgb_to_lab
 
 W, H, FRAMES = 640, 360, 25
-METHODS = ("cdl", "hist", "reinhard")
 
 # label -> ffmpeg filter chain simulating a different camera/lighting setup
 VARIANTS = {
@@ -93,8 +93,7 @@ def main() -> int:
         print(f"matching with {method}...")
         rc = cli_main([
             "match", str(footage),
-            "-r", "reference.mp4",
-            "--method", method, "--strength", "1.0",
+            "-r", "reference.mp4", "--strength", "1.0",
             "-o", str(workdir / method),
             "--render", "--overwrite", "-q",
         ])

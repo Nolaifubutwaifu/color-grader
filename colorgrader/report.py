@@ -121,7 +121,6 @@ def write_report(
     transforms: list[Transform],
     errors: list[dict],
     reference_index: int,
-    method: str,
     strength: float,
 ) -> Path:
     """Render the before/after report."""
@@ -196,7 +195,6 @@ def write_report(
 <p class="sub">{len(stats)} clip{'s' if len(stats) != 1 else ''} &middot;
 matched to <strong>{html.escape(stats[reference_index].name)}</strong></p>
 <div class="summary"><dl>
-  <dt>Method</dt><dd>{html.escape(method)}</dd>
   <dt>Strength</dt><dd>{strength:.2f}</dd>
   <dt>Mean anchor &Delta;E</dt><dd>{avg_before:.2f} &rarr; {avg_after:.2f}</dd>
 </dl></div>

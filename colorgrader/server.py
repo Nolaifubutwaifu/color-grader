@@ -209,11 +209,11 @@ def _export(body: dict) -> dict:
         write_cdl(tf, cdl_dir / f"{stem}.cdl", clip_id=stem)
 
     write_report(output / "report.html", stats, transforms, errors,
-                 reference, method, strength)
+                 reference, strength)
     write_instructions(output / "HOW_TO_USE.md")
     write_resolve_script(output / "apply_in_resolve.py", lut_map)
     (output / "match.json").write_text(json.dumps({
-        "version": __version__, "method": method, "strength": strength,
+        "version": __version__, "strength": strength,
         "reference": ref.name,
         "clips": [
             {"name": s.name, "is_reference": i == reference,

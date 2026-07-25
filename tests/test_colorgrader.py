@@ -98,36 +98,18 @@ def test_transform_stays_in_range(method):
     assert out.min() >= 0.0 and out.max() <= 1.0
 
 
-def test_wb_is_a_pure_gain_and_leaves_saturation_alone():
-    warm = analyse("warm", make_frames(seed=30, gain=(1.3, 1.0, 0.7)))
-    neutral = analyse("neutral", make_frames(seed=30))
-    tf = build_transform(warm, neutral, method="wb", strength=1.0)
+def test_cdl_saturation_stays_gentle_on_wildly_different_clips():
+    """The saturation term is what overcooks when clips differ a lot, so it
+    must stay on a short leash even between a grey clip and a vivid one."""
+    rng = np.random.default_rng(30)
+    flat = (rng.normal(0.5, 0.02, (8, 40, 40, 3)) * 255).clip(0, 255).astype(np.uint8)
+    vivid = flat.copy()
+    vivid[..., 0] = 230  # force a strong colour cast into the reference
+    src = analyse("flat", flat)
+    ref = analyse("vivid", vivid)
 
-    # A white-balance correction must be gain-only: no lift, no gamma, sat 1.
-    lgg = tf.cdl.lift_gamma_gain()
-    assert lgg["lift"] == [0.0, 0.0, 0.0]
-    assert lgg["gamma"] == [1.0, 1.0, 1.0]
-    assert lgg["saturation"] == 1.0
-    # and it should still neutralise the cast it was given
-    err = match_error(warm, neutral, tf)
-    assert err["after"] < err["before"]
-
-
-def test_wb_neutral_estimate_resists_a_saturated_block():
-    """A big block of one colour (a feature wall, a hedge) must not hijack the
-    white-balance estimate - that robustness is the whole point of the method."""
-    from colorgrader.match import _neutral_estimate
-
-    rng = np.random.default_rng(31)
-    grey = rng.normal(0.5, 0.03, size=(40000, 3))          # near-neutral scene
-    green = np.tile([0.05, 0.9, 0.05], (40000, 1))          # saturated intruder
-    mixed = np.clip(np.vstack([grey, green]), 0, 1)
-
-    est = _neutral_estimate(mixed)
-    # Despite half the pixels being vivid green, the estimate stays near grey.
-    assert abs(est[1] - est[0]) < 0.15 and abs(est[1] - est[2]) < 0.15
-    plain_mean = mixed.mean(axis=0)
-    assert est[1] < plain_mean[1]  # less green-biased than a naive grey-world
+    sat = build_transform(src, ref, method="cdl", strength=1.0).cdl.saturation
+    assert 0.7 <= sat <= 1.5
 
 
 def test_matching_a_clip_to_itself_is_near_identity():

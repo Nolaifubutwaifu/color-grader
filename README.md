@@ -43,10 +43,10 @@ colorgrade gui /path/to/footage      # folder is optional; you can load one in t
 
 Opens a local app in your browser. Hit **Browse…** for a native folder dialog
 (or type a path), and it lays every clip out with a **draggable before/after
-wipe** on each one. Change the method,
-drag the **strength** slider, or pick a different **reference** and every clip
-re-matches live. Set a per-clip strength override when one shot needs a lighter
-touch. Hit **Export** to write the LUTs, report and instructions — tick *bake
+wipe** on each one. Drag the **strength** slider or pick a different
+**reference** and every clip re-matches live. Set a per-clip strength override
+when one shot needs a lighter touch. Hit **Export** to write the LUTs, report
+and instructions — tick *bake
 video* to get finished matched files too.
 
 It runs entirely on your machine (localhost, no upload, no account), and it is
@@ -115,56 +115,44 @@ colorgrade analyze footage/
 |---|---|---|
 | `--reference` | most typical clip | Clip to match everything to |
 | `--strength` | `0.85` | 0 = untouched, 1 = full match |
-| `--method` | `cdl` | `wb`, `cdl`, `reinhard`, or `hist` |
 | `--frames` | `12` | Frames sampled per clip |
 | `--lut-size` | `33` | 3D LUT lattice size |
 | `--render` | off | Also bake out video files |
 | `--codec` | `h264` | `h264`, `h265`, or `prores` |
 
-### The four methods
+### How the match works
 
-**`wb`** corrects white balance and exposure only — a per-channel gain that
-neutralises each clip's colour cast onto the reference, leaving contrast and
-saturation alone. It is the **content-robust** one: because it only moves the
-neutral point, it can balance clips that contain *different things* (a shot of
-the street outside against a shot of the styling chair inside) without
-distorting either. This is the method for **mixed indoor/outdoor lighting**.
-Its trade-off is that it does not touch contrast, so clips that differ in
-contrast as well as colour are only half-fixed — follow with `cdl` if needed.
+There is one matching method, because it is the one that actually holds up.
+It fits an **ASC CDL** correction from each clip's measured tonal anchors:
+the black point, midtone and white point, **per channel**. Matching those three
+points on each of red, green and blue is what corrects a colour cast — a warm
+clip has its red curve sitting high and its blue low, and pulling all three
+channels onto the reference's neutralises it. A gentle saturation nudge finishes
+the match. The result exports cleanly as a `.cube` LUT, as ASC CDL, and as
+lift/gamma/gain numbers, because it *is* those controls.
 
-**`cdl`** (default) matches black point, midtone and white point per channel,
-then aligns saturation. The most predictable of the three, and the only one
-whose numbers map cleanly onto real grading controls. It was the only method
-that improved every clip in testing, which is why it is the default.
-
-**`hist`** reshapes each channel's full tonal distribution onto the reference's.
-The most literal match, and it scored best on test footage where every clip
-shared identical content — the ideal case for it. Real shoots are not that case:
-forcing a wide landscape's distribution onto a close-up is exactly how histogram
-matching goes wrong, and it is the most likely of the three to band on skies and
-gradients. Worth trying when your clips really are the same setup. Pair it with a
-lower `--strength`.
-
-**`reinhard`** matches average lightness and colour cast, plus their spread, in
-Lab. It handles a heavily desaturated clip better than anything else here, but on
-clips that already nearly match it can make things slightly *worse* — matching
-standard deviations has nothing useful left to do at that point and starts
-amplifying differences instead. Reach for it when one clip is badly off and the
-rest are fine; check the report afterwards.
+Earlier versions shipped three more methods — histogram matching, a Reinhard
+mean/standard-deviation transfer, and a standalone white-balance gain. Testing
+retired all three. The distribution methods only win when every clip contains
+*identical* content (a synthetic ideal real footage never meets) and otherwise
+overcook — forcing one image's histogram onto another's blows out saturation and
+bands gradients. The white-balance gain looked promising but could not reliably
+*measure* a cast from arbitrary footage: with no shared grey reference, blind
+estimators return a near-neutral gain even on a clearly warm clip, and sometimes
+make the match worse. Per-channel CDL sidesteps that by matching the anchors it
+can actually measure. See the commit history if you want the evidence.
 
 Measured by `python tests/benchmark.py`, as mean Lab ΔE against the reference
-(lower is better, **bold** is best per row):
+(lower is better) — the correction improves every clip:
 
-| clip | before | `cdl` | `hist` | `reinhard` |
-|---|---|---|---|---|
-| mild warm cast | 1.85 | 1.10 | **0.85** | 2.24 |
-| cool + flat | 4.12 | 2.83 | **1.51** | 3.38 |
-| desaturated + dark | 39.47 | 11.90 | 8.55 | **6.78** |
+| clip | before | after |
+|---|---|---|
+| mild warm cast | 1.85 | 1.10 |
+| cool + flat | 4.12 | 2.91 |
+| desaturated + dark | 39.47 | 12.67 |
 
-Those clips are all derived from one source render, so the comparison is a true
-per-pixel measure rather than the anchor metric the tool tunes against. Take it
-as a rough guide to each method's character, not a ranking — your footage does
-not have identical content across shots.
+Those clips are all derived from one source render, so this is a true per-pixel
+measure rather than the anchor metric the tool tunes against.
 
 ## Mixed lighting — a social feed shot indoors and out
 
@@ -172,18 +160,16 @@ When some clips were shot inside (warm) and some outside (cool) and you want the
 whole set to feel like one cohesive feed, this is the recipe:
 
 ```bash
-colorgrade gui /footage        # or: colorgrade match /footage -r hero.mov --method wb
+colorgrade gui /footage        # or: colorgrade match /footage -r hero.mov
 ```
 
 1. **Pick a hero that has the look you want the feed to have** — usually a
    well-lit indoor clip with flattering skin and hair tones. Everything else
    gets pulled toward it.
-2. **Use the `wb` (white balance) method.** It neutralises the indoor/outdoor
-   cast without reshaping the image, so it survives the fact that an outdoor
-   clip contains different things than an indoor one. The full-match methods
-   (`cdl`, `hist`) tend to *overcook* clips whose content differs a lot from
-   the hero — pushing saturation and contrast to force a match that colour
-   alone should make.
+2. **Start at a moderate strength (0.6–0.8).** The per-channel match neutralises
+   the indoor/outdoor cast well; easing off keeps it from over-reaching on a
+   clip whose content differs a lot from the hero. Push toward 1.0 for clips
+   that are genuinely the same setup.
 3. **Judge by eye, not by the ΔE number.** An outdoor clip will always show a
    higher residual ΔE than an indoor one, because it genuinely contains
    different things — that residual is *content*, not colour, and no colour
@@ -191,8 +177,10 @@ colorgrade gui /footage        # or: colorgrade match /footage -r hero.mov --met
    the same warmth across clips. The report's side-by-side is there for exactly
    this.
 4. **Dial back the odd stubborn clip.** If one outdoor shot still looks pushed,
-   drop its **per-clip strength override** in the GUI (or lower global
-   `--strength`) until it sits right, rather than forcing a full match.
+   drop its **per-clip strength override** in the GUI until it sits right. If a
+   shot is lit so differently that no strength looks right, it is faster to nudge
+   its temperature by hand in Premiere than to force a statistical match — the
+   tool won't pretend otherwise.
 5. Optional: once everything is *balanced*, add one creative look on top in
    Premiere (a single Lumetri look across all clips) to give the feed its brand
    feel. Balance first, look second.
@@ -260,13 +248,13 @@ clips really are the same setup.
 pip install pytest
 python -m pytest tests/ -q
 
-# End-to-end: generates footage, grades it with every method, and measures
-# the result through ffmpeg's own LUT application
+# End-to-end: generates footage, grades it, and measures the result
+# through ffmpeg's own LUT application
 python tests/benchmark.py
 ```
 
 The colour maths lives in `stats.py` (measurement) and `match.py` (correction).
-Every method produces the same thing: a function from RGB to RGB. Everything
+The correction is a `Transform` — a function from RGB to RGB. Everything
 downstream — LUT export, ffmpeg baking, report previews — only talks to that
-interface, so a new matching method means one function and one entry in
-`_BUILDERS`.
+interface, so an alternative correction would be one function and one entry in
+`_BUILDERS`, without touching the rest of the tool.

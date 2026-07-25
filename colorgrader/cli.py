@@ -13,7 +13,7 @@ from .ffmpeg import (
     find_ffmpeg, find_ffprobe, grab_frames, probe,
 )
 from .lut import write_cdl, write_cube
-from .match import METHODS, build_transform, identity_transform, match_error
+from .match import build_transform, identity_transform, match_error
 from .nle import write_instructions, write_resolve_script
 from .render import EXTENSIONS, render
 from .report import write_report
@@ -107,7 +107,7 @@ def cmd_match(args: argparse.Namespace) -> int:
         )
     reference = stats[ref_index]
     _log(f"\nreference: {reference.name}", quiet)
-    _log(f"method: {args.method}  strength: {args.strength:.2f}\n", quiet)
+    _log(f"strength: {args.strength:.2f}\n", quiet)
 
     outdir = Path(args.output).expanduser()
     lut_dir, cdl_dir = outdir / "luts", outdir / "cdl"
@@ -120,7 +120,7 @@ def cmd_match(args: argparse.Namespace) -> int:
             _log(f"  {st.name}: reference, no correction", quiet)
             continue
 
-        tf = build_transform(st, reference, args.method, args.strength)
+        tf = build_transform(st, reference, strength=args.strength)
         err = match_error(st, reference, tf)
         transforms.append(tf)
         errors.append(err)
@@ -140,7 +140,7 @@ def cmd_match(args: argparse.Namespace) -> int:
 
     report_path = write_report(
         outdir / "report.html", stats, transforms, errors,
-        ref_index, args.method, args.strength,
+        ref_index, args.strength,
     )
     write_instructions(outdir / "HOW_TO_USE.md")
     write_resolve_script(outdir / "apply_in_resolve.py", lut_map)
@@ -149,7 +149,6 @@ def cmd_match(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "version": __version__,
-                "method": args.method,
                 "strength": args.strength,
                 "reference": reference.name,
                 "clips": [
@@ -279,8 +278,6 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("-r", "--reference", metavar="CLIP",
                    help="Clip everything else should match. "
                         "Default: the most typical clip of the set.")
-    m.add_argument("--method", choices=METHODS, default="cdl",
-                   help="Matching method (default: cdl).")
     m.add_argument("--strength", type=float, default=0.85, metavar="0-1",
                    help="How far to push toward the reference (default: 0.85).")
     m.add_argument("--lut-size", type=int, default=33, metavar="N",

@@ -158,15 +158,6 @@ INDEX_HTML = r"""<!doctype html>
 
 <div class="controls hidden" id="controls">
   <div class="ctl">
-    <label>Method</label>
-    <div class="seg" id="method">
-      <button data-m="wb" title="White balance only - best for mixed indoor/outdoor lighting">White balance</button>
-      <button data-m="cdl" class="on" title="Full match: black/mid/white per channel + saturation">CDL</button>
-      <button data-m="hist" title="Match the full tonal distribution - strongest, can band">Histogram</button>
-      <button data-m="reinhard" title="Lab mean/spread transfer">Reinhard</button>
-    </div>
-  </div>
-  <div class="ctl">
     <label>Strength</label>
     <div class="slider-row">
       <input type="range" id="strength" min="0" max="100" value="85">
@@ -194,7 +185,7 @@ INDEX_HTML = r"""<!doctype html>
 
 <script>
 const $ = s => document.querySelector(s);
-const state = { clips:[], ref:0, method:"cdl", strength:0.85, overrides:{}, folder:"" };
+const state = { clips:[], ref:0, strength:0.85, overrides:{}, folder:"" };
 let previewTimer = null;
 
 function toast(html, ms=6000){
@@ -301,7 +292,7 @@ function wireWipe(i){
 }
 
 async function preview(){
-  const body = {method:state.method, strength:state.strength, reference:state.ref,
+  const body = {strength:state.strength, reference:state.ref,
                 overrides:state.overrides};
   let data;
   try { data = await api("/api/preview", body); }
@@ -363,11 +354,6 @@ $("#browse").onclick = async ()=>{
   finally { btn.disabled = false; }
 };
 $("#folder").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
-$("#method").addEventListener("click", e=>{
-  const b = e.target.closest("button[data-m]"); if(!b) return;
-  [...$("#method").children].forEach(x=>x.classList.remove("on"));
-  b.classList.add("on"); state.method = b.dataset.m; schedulePreview();
-});
 $("#strength").addEventListener("input", e=>{
   state.strength = e.target.value/100;
   $("#strengthVal").textContent = e.target.value+"%";
@@ -381,7 +367,7 @@ $("#export").onclick = async ()=>{
   try {
     const data = await api("/api/export", {
       folder:state.folder, output:$("#outdir").value.trim(),
-      method:state.method, strength:state.strength, reference:state.ref,
+      strength:state.strength, reference:state.ref,
       overrides:state.overrides, render:$("#renderChk").checked,
     });
     toast(`Exported <b>${data.lut_count}</b> LUT${data.lut_count!==1?"s":""}`
