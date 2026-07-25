@@ -45,14 +45,24 @@ ASC CDL, or the Color page's CDL import.
 
 ## Premiere Pro
 
+There is no way to script a LUT onto a Premiere clip reliably, so you have two
+honest choices - one with no grading work at all:
+
+Zero manual work - use the baked files (recommended for Premiere):
+  Re-run with `--render` (or tick "bake video" in the GUI). colorgrader applies
+  each correction with ffmpeg and writes finished, matched files to `rendered/`.
+  Drop those on your timeline, or right-click your originals > Replace Footage,
+  and you are done. No LUT to load, nothing to grade.
+
+Two clicks per clip - load the LUT (keeps your original files):
   1. Select the clip, open the Lumetri Color panel.
   2. Basic Correction > Input LUT > Browse... > pick the clip's `.cube`.
 
-Use Input LUT, not Creative > Look: Input LUT sits at the top of Lumetri's
-chain, so your creative adjustments stack on top of the corrected image.
+  Use Input LUT, not Creative > Look: Input LUT sits at the top of Lumetri's
+  chain, so your creative adjustments stack on top of the corrected image.
 
-Premiere does not import ASC CDL. Use the `.cube` files, or type the
-lift/gamma/gain numbers from the report into Lumetri's colour wheels.
+Premiere does not import ASC CDL. Use the `.cube` files, the baked footage, or
+type the lift/gamma/gain numbers from the report into Lumetri's colour wheels.
 
 ## Dialling it back
 

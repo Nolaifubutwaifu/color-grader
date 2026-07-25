@@ -194,6 +194,19 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gui(args: argparse.Namespace) -> int:
+    # Imported lazily so the CLI stays snappy and http.server is only pulled
+    # in when someone actually wants the interface.
+    from .server import serve
+
+    folder = args.folder
+    if folder is None and args.inputs:
+        folder = args.inputs[0]
+    serve(folder=folder, host=args.host, port=args.port,
+          open_browser=not args.no_browser)
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     try:
         ffmpeg_path = find_ffmpeg(args.ffmpeg)
@@ -255,6 +268,17 @@ def build_parser() -> argparse.ArgumentParser:
     a = sub.add_parser("analyze", help="Report each clip's colour without grading.")
     common(a)
     a.set_defaults(func=cmd_analyze)
+
+    g = sub.add_parser("gui", help="Open the interface in your browser.")
+    g.add_argument("inputs", nargs="*",
+                   help="Optional folder of clips to preload.")
+    g.add_argument("--folder", metavar="DIR",
+                   help="Folder of clips to preload (same as positional).")
+    g.add_argument("--port", type=int, default=8000, help="Port (default: 8000).")
+    g.add_argument("--host", default="127.0.0.1", help="Bind address.")
+    g.add_argument("--no-browser", action="store_true",
+                   help="Do not open a browser automatically.")
+    g.set_defaults(func=cmd_gui)
 
     d = sub.add_parser("doctor", help="Check that ffmpeg and numpy are usable.")
     d.add_argument("--ffmpeg", metavar="PATH")

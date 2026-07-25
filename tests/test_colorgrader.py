@@ -228,3 +228,101 @@ def test_png_round_trips_through_a_real_decoder():
     original = make_frames(n=1, h=16, w=24, seed=16)[0]
     decoded = np.array(zlib_png.open(io.BytesIO(encode_png(original))).convert("RGB"))
     assert np.array_equal(decoded, original)
+
+
+# --------------------------------------------------------------------------
+# GUI server logic (exercised without ffmpeg by injecting analysed clips)
+# --------------------------------------------------------------------------
+
+from colorgrader import server  # noqa: E402
+from colorgrader.webui import INDEX_HTML  # noqa: E402
+
+
+@pytest.fixture
+def loaded_session():
+    """Populate the server's in-memory session as if a folder had loaded."""
+    stats = [
+        analyse("neutral.mp4", make_frames(seed=20)),
+        analyse("warm.mp4", make_frames(seed=20, gain=(1.3, 1.0, 0.7))),
+        analyse("dark.mp4", make_frames(seed=20, bias=-0.12)),
+    ]
+
+    class _Info:  # stand-in for ffmpeg.ClipInfo; only .path/.stem are read
+        def __init__(self, name):
+            self.path = Path(name)
+            self.stem = Path(name).stem
+
+    server._SESSION.update(
+        folder="/tmp/footage",
+        infos=[_Info(s.name) for s in stats],
+        stats=stats,
+        frames=12,
+    )
+    yield stats
+    server._SESSION.update(folder=None, infos=[], stats=[], frames=12)
+
+
+def test_effective_strength_prefers_override():
+    assert server._effective_strength(0, 0.85, {}) == 0.85
+    assert server._effective_strength(2, 0.85, {"2": 0.4}) == 0.4     # JSON keys are strings
+    assert server._effective_strength(2, 0.85, {2: 0.4}) == 0.4       # and ints work too
+    assert server._effective_strength(1, 0.85, {"2": 0.4}) == 0.85    # unrelated override ignored
+    assert server._effective_strength(2, 0.85, {"2": None}) == 0.85   # cleared override falls back
+
+
+def test_thumb_uri_is_a_valid_png_data_uri():
+    uri = server._thumb_uri(make_frames(n=1, h=8, w=8)[0])
+    assert uri.startswith("data:image/png;base64,")
+    import base64
+    assert base64.b64decode(uri.split(",", 1)[1]).startswith(b"\x89PNG")
+
+
+def test_preview_matches_and_reports_delta(loaded_session):
+    result = server._preview("cdl", 1.0, reference=0, overrides={})
+    assert result["reference"] == 0
+    assert len(result["clips"]) == 3
+
+    ref_clip = next(c for c in result["clips"] if c["i"] == 0)
+    assert ref_clip["delta"] == {"before": 0.0, "after": 0.0}
+    assert ref_clip["lgg"] is None
+
+    for c in result["clips"]:
+        assert c["after"].startswith("data:image/png;base64,")
+        if c["i"] != 0:
+            assert c["delta"]["after"] <= c["delta"]["before"]
+            assert set(c["lgg"]) == {"lift", "gamma", "gain", "saturation"}
+
+
+def test_preview_override_changes_a_single_clip(loaded_session):
+    at_zero = server._preview("cdl", 1.0, 0, {"1": 0.0})
+    warm = next(c for c in at_zero["clips"] if c["i"] == 1)
+    # Strength 0 on clip 1 means no correction, so it stays at its original delta.
+    assert warm["delta"]["after"] == warm["delta"]["before"]
+
+
+def test_preview_clamps_out_of_range_reference(loaded_session):
+    assert server._preview("cdl", 0.85, reference=99, overrides={})["reference"] == 2
+
+
+def test_export_writes_all_deliverables(tmp_path, loaded_session):
+    out = tmp_path / "out"
+    result = server._export({
+        "output": str(out), "method": "cdl", "strength": 0.85,
+        "reference": 0, "overrides": {}, "render": False,
+    })
+    assert result["lut_count"] == 2 and result["rendered"] == 0
+    assert (out / "report.html").exists()
+    assert (out / "HOW_TO_USE.md").exists()
+    assert (out / "apply_in_resolve.py").exists()
+    assert (out / "match.json").exists()
+    assert len(list((out / "luts").glob("*.cube"))) == 2
+    assert len(list((out / "cdl").glob("*.cdl"))) == 2
+
+
+def test_index_html_is_self_contained():
+    # No external origins - the GUI must work offline on an editing machine.
+    assert "<title>colorgrader</title>" in INDEX_HTML
+    for marker in ("/api/load", "/api/preview", "/api/export"):
+        assert marker in INDEX_HTML
+    assert "http://" not in INDEX_HTML.replace("http://127.0.0.1", "")
+    assert "src=\"http" not in INDEX_HTML and "cdn" not in INDEX_HTML.lower()

@@ -33,6 +33,26 @@ colorgrade doctor
 
 ## Use
 
+Two ways in: a browser interface, or the command line.
+
+### The interface
+
+```bash
+colorgrade gui /path/to/footage      # folder is optional; you can load one in the app
+```
+
+Opens a local app in your browser. Point it at a folder of clips and it lays them
+all out with a **draggable before/after wipe** on each one. Change the method,
+drag the **strength** slider, or pick a different **reference** and every clip
+re-matches live. Set a per-clip strength override when one shot needs a lighter
+touch. Hit **Export** to write the LUTs, report and instructions — tick *bake
+video* to get finished matched files too.
+
+It runs entirely on your machine (localhost, no upload, no account), and it is
+the same engine as the CLI below — just with a picture.
+
+### The command line
+
 ```bash
 colorgrade match /path/to/footage
 ```
@@ -50,17 +70,26 @@ HOW_TO_USE.md         step-by-step for both Resolve and Premiere
 
 Open `report.html` first. If the match looks right, load the LUTs.
 
-### Getting them into your NLE
+### Do you have to apply these by hand?
 
-**Resolve** — drag a `.cube` onto a clip's first node, or run the generated
-`apply_in_resolve.py` from Workspace › Console › Py3 to do the whole timeline at
-once.
+Mostly no.
 
-**Premiere** — Lumetri Color › Basic Correction › Input LUT › Browse. Use *Input
-LUT*, not Creative › Look, so your own adjustments stack on top of a corrected
-image.
+**Baked files** — run with `--render` (or tick *bake video* in the GUI) and
+colorgrader applies each correction with ffmpeg and hands you finished, matched
+video files in `rendered/`. Drop them on your timeline — in Premiere or anything
+else — and there is nothing left to grade. This is the zero-effort path, and the
+one to use for Premiere.
 
-Full instructions land in `HOW_TO_USE.md` next to the LUTs.
+**Resolve** — the generated `apply_in_resolve.py` applies every LUT across your
+whole timeline automatically (Workspace › Console › Py3). Or drag a single
+`.cube` onto a clip's first node.
+
+**Premiere, keeping your originals** — Premiere's scripting can't reliably
+assign a LUT, so this one is manual, but it is two clicks: Lumetri Color › Basic
+Correction › Input LUT › Browse. Use *Input LUT*, not Creative › Look, so your
+own adjustments stack on top of a corrected image.
+
+Full step-by-step for both apps lands in `HOW_TO_USE.md` next to the LUTs.
 
 ### Options worth knowing
 
