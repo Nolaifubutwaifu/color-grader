@@ -143,19 +143,6 @@ def _target_size(info: ClipInfo, max_width: int) -> tuple[int, int]:
     return (w - w % 2 or 2, h - h % 2 or 2)
 
 
-def sample_timestamps(duration: float, count: int) -> list[float]:
-    """Evenly spaced sample points, trimming the head/tail where slates,
-    fades and handles live."""
-    if duration <= 0:
-        return [0.0] * count
-    head = min(0.5, duration * 0.05)
-    tail = min(0.5, duration * 0.05)
-    usable = max(duration - head - tail, 0.0)
-    if usable <= 0 or count == 1:
-        return [duration / 2] * count
-    return [head + usable * (i + 0.5) / count for i in range(count)]
-
-
 def grab_frames(
     info: ClipInfo,
     ffmpeg_path: str,
@@ -164,34 +151,39 @@ def grab_frames(
 ) -> np.ndarray:
     """Return sampled frames as uint8 (n, h, w, 3) RGB.
 
-    Each frame is a separate input-seek decode, which is fast even on long
-    clips and avoids decoding footage we are going to throw away.
+    One ffmpeg process per clip: the `fps` filter thins the usable region down
+    to roughly `count` evenly spaced frames in a single decode. Spawning a
+    process per frame instead (the obvious approach) is what makes a 200-clip
+    batch crawl - the subprocess overhead dwarfs the decode - so we pay it once
+    per clip and let ffmpeg do the spacing.
     """
     w, h = _target_size(info, max_width)
-    frames = []
-    for ts in sample_timestamps(info.duration, count):
-        cmd = [
-            ffmpeg_path, "-v", "error",
-            "-ss", f"{ts:.3f}",
-            "-i", str(info.path),
-            "-frames:v", "1",
-            "-vf", f"scale={w}:{h}",
-            "-f", "rawvideo", "-pix_fmt", "rgb24",
-            "-",
-        ]
-        res = subprocess.run(cmd, capture_output=True)
-        expected = w * h * 3
-        if res.returncode != 0 or len(res.stdout) < expected:
-            continue
-        buf = np.frombuffer(res.stdout[:expected], dtype=np.uint8)
-        frames.append(buf.reshape(h, w, 3))
+    expected = w * h * 3
+    cmd = [ffmpeg_path, "-v", "error"]
 
-    if not frames:
+    dur = info.duration
+    if dur and dur > 0:
+        # Trim the head/tail where slates, fades and handles live.
+        head = min(0.5, dur * 0.05)
+        usable = max(dur - head - min(0.5, dur * 0.05), 0.05)
+        fps = max(count / usable, 0.01)
+        cmd += ["-ss", f"{head:.3f}", "-t", f"{usable:.3f}", "-i", str(info.path),
+                "-vf", f"fps={fps:.5f},scale={w}:{h}"]
+    else:
+        # Unknown duration: just take the first `count` frames.
+        cmd += ["-i", str(info.path), "-vf", f"scale={w}:{h}"]
+
+    # Ask for a couple extra: fps rounding can hand back count-1 near the tail.
+    cmd += ["-frames:v", str(count + 2), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+
+    res = subprocess.run(cmd, capture_output=True)
+    n = len(res.stdout) // expected
+    if n == 0:
         raise FFmpegError(
             f"Could not decode any frames from {info.name}. "
             "The file may be corrupt or in a codec this ffmpeg build lacks."
         )
-    return np.stack(frames)
+    return np.frombuffer(res.stdout[:n * expected], dtype=np.uint8).reshape(n, h, w, 3)
 
 
 def collect_inputs(paths: list[str]) -> list[Path]:

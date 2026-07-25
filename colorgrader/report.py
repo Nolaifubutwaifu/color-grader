@@ -135,7 +135,8 @@ def write_report(
             else np.clip(tf.apply(before.astype(np.float64) / 255.0) * 255.0, 0, 255)
             .astype(np.uint8)
         )
-        after_pixels = st.pixels if is_ref else tf.apply(st.pixels)
+        px = st.pixels_float
+        after_pixels = px if is_ref else tf.apply(px)
 
         badge = (
             '<span class="badge ref">REFERENCE</span>'
@@ -171,7 +172,7 @@ def write_report(
     <div class="pane">
       <h3>Original</h3>
       <img src="{_data_uri(before)}" alt="original frame">
-      <div class="scope">{_histogram_svg(st.pixels)}</div>
+      <div class="scope">{_histogram_svg(px)}</div>
     </div>
     <div class="pane">
       <h3>{'Reference (unchanged)' if is_ref else 'Matched'}</h3>

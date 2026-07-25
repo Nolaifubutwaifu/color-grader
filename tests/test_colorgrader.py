@@ -100,8 +100,8 @@ def test_transform_stays_in_range(method):
 
 def test_matching_a_clip_to_itself_is_near_identity():
     st = analyse("same", make_frames(seed=6))
-    out = build_transform(st, st, method="cdl", strength=1.0).apply(st.pixels)
-    assert np.abs(out - st.pixels).mean() < 0.02
+    out = build_transform(st, st, method="cdl", strength=1.0).apply(st.pixels_float)
+    assert np.abs(out - st.pixels_float).mean() < 0.02
 
 
 def test_strength_scales_the_correction():

@@ -109,7 +109,9 @@ class ClipStats:
     """Everything we measure about one clip's colour."""
 
     name: str
-    pixels: np.ndarray        # (n, 3) float 0-1, subsampled RGB
+    pixels: np.ndarray        # (n, 3) uint8, subsampled RGB. Stored small so a
+                              # 200-clip batch fits in memory; convert with
+                              # .pixels_float where 0-1 floats are needed.
     percentiles: np.ndarray   # (3, 3) rows = shadow/mid/highlight, cols = RGB
     lab_mean: np.ndarray      # (3,)
     lab_std: np.ndarray       # (3,)
@@ -118,6 +120,11 @@ class ClipStats:
     exposure: float           # mean Rec.709 luma
     crop: tuple[int, int, int, int]
     thumbnail: np.ndarray     # (h, w, 3) uint8, representative frame
+
+    @property
+    def pixels_float(self) -> np.ndarray:
+        """The subsampled pixels as (n, 3) float in 0-1, built on demand."""
+        return self.pixels.astype(np.float64) / 255.0
 
     @property
     def shadow(self) -> np.ndarray:
@@ -168,7 +175,7 @@ def analyse(name: str, frames: np.ndarray, max_pixels: int = 400_000) -> ClipSta
 
     return ClipStats(
         name=name,
-        pixels=rgb,
+        pixels=flat,  # keep the uint8 subsample; floats are derived on demand
         percentiles=percentiles,
         lab_mean=lab.mean(axis=0),
         lab_std=lab.std(axis=0) + 1e-6,
