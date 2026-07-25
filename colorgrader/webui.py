@@ -145,6 +145,7 @@ INDEX_HTML = r"""<!doctype html>
   <div class="brand">color<span>grader</span></div>
   <div class="field">
     <input id="folder" type="text" placeholder="Path to a folder of clips, e.g. /Users/you/footage" spellcheck="false">
+    <button class="btn" id="browse" title="Choose a folder">Browse…</button>
     <button class="btn" id="load">Load</button>
   </div>
   <div class="grow"></div>
@@ -352,6 +353,14 @@ function setOverride(i,v){
 
 // ---- control wiring ----
 $("#load").onclick = load;
+$("#browse").onclick = async ()=>{
+  const btn = $("#browse"); btn.disabled = true;
+  try {
+    const d = await api("/api/browse", {initialdir:$("#folder").value.trim()});
+    if (d.path){ $("#folder").value = d.path; load(); }  // empty = user cancelled
+  } catch(e){ toast('<span class="err">'+escapeHtml(e.message)+'</span>'); }
+  finally { btn.disabled = false; }
+};
 $("#folder").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#method").addEventListener("click", e=>{
   const b = e.target.closest("button[data-m]"); if(!b) return;

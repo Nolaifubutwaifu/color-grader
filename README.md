@@ -41,8 +41,9 @@ Two ways in: a browser interface, or the command line.
 colorgrade gui /path/to/footage      # folder is optional; you can load one in the app
 ```
 
-Opens a local app in your browser. Point it at a folder of clips and it lays them
-all out with a **draggable before/after wipe** on each one. Change the method,
+Opens a local app in your browser. Hit **Browse…** for a native folder dialog
+(or type a path), and it lays every clip out with a **draggable before/after
+wipe** on each one. Change the method,
 drag the **strength** slider, or pick a different **reference** and every clip
 re-matches live. Set a per-clip strength override when one shot needs a lighter
 touch. Hit **Export** to write the LUTs, report and instructions — tick *bake
@@ -167,9 +168,12 @@ clips really are the same setup.
 - **The LUTs go first in the chain.** They are technical corrections. Apply them
   before any creative look, so the look lands on footage that already matches.
 - **Log and raw footage:** the LUTs are built from the clip as ffmpeg decodes it.
-  If you are shooting log, apply your conversion to Rec.709 first, then generate
-  the LUTs from the converted footage — otherwise the correction is fitted to a
-  curve you are about to replace.
+  If you are shooting **log** (Sony S-Log2/S-Log3, Canon C-Log, etc.), apply your
+  conversion to Rec.709 first, then generate the LUTs from the converted footage
+  — otherwise the correction is fitted to a curve you are about to replace.
+  Standard-dynamic-range profiles do **not** need this: Sony's Movie gamma
+  (a7III Picture Profile 1) and the Cine gammas are already display-referred, so
+  feed them in as-is. The rule is log vs. not-log, not the profile number.
 - **One grade per file.** If a single file contains several very different
   setups, it gets one average correction. Split it into separate clips first.
 - **Letterboxed footage** is handled — black bars are detected and excluded

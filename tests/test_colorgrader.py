@@ -319,6 +319,59 @@ def test_export_writes_all_deliverables(tmp_path, loaded_session):
     assert len(list((out / "cdl").glob("*.cdl"))) == 2
 
 
+def test_pick_folder_reports_when_no_picker_available():
+    # This test host has no Tk / no display, so the real subprocess must fail
+    # with a friendly message rather than hanging or raising something opaque.
+    with pytest.raises(RuntimeError, match="type or paste"):
+        server._pick_folder()
+
+
+def test_pick_folder_returns_chosen_path(monkeypatch):
+    class _Proc:
+        returncode = 0
+        stdout = "\n/Users/you/footage\n"
+
+    monkeypatch.setattr(server.subprocess, "run", lambda *a, **k: _Proc())
+    assert server._pick_folder("/start/here") == "/Users/you/footage"
+
+
+def test_pick_folder_treats_cancel_as_empty(monkeypatch):
+    class _Proc:
+        returncode = 0
+        stdout = "\n"  # dialog cancelled -> blank line only
+
+    monkeypatch.setattr(server.subprocess, "run", lambda *a, **k: _Proc())
+    assert server._pick_folder() == ""
+
+
+def test_browse_endpoint_surfaces_picker_error():
+    """The /api/browse route must turn a missing picker into a clean 400."""
+    import io
+    import json as _json
+
+    class _FakeRequest(server._Handler):
+        def __init__(self):  # bypass BaseHTTPRequestHandler's socket setup
+            self.path = "/api/browse"
+            self.headers = {"Content-Length": "2"}
+            self.rfile = io.BytesIO(b"{}")
+            self.wfile = io.BytesIO()
+            self._status = None
+
+        def send_response(self, code):
+            self._status = code
+
+        def send_header(self, *a):
+            pass
+
+        def end_headers(self):
+            pass
+
+    handler = _FakeRequest()
+    handler.do_POST()
+    assert handler._status == 400
+    assert "folder path" in _json.loads(handler.wfile.getvalue())["error"]
+
+
 def test_index_html_is_self_contained():
     # No external origins - the GUI must work offline on an editing machine.
     assert "<title>colorgrader</title>" in INDEX_HTML

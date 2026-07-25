@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
+import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,6 +53,55 @@ def _effective_strength(index: int, base: float, overrides: dict) -> float:
     if index in overrides and overrides[index] is not None:
         return float(overrides[index])
     return base
+
+
+# A native folder chooser, run as its own process so Tk owns a real main
+# thread - opening Tk from one of the server's worker threads crashes on macOS.
+# Prints the chosen path on the last line; "" means the user cancelled.
+_PICKER_SRC = r"""
+import sys
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+except Exception:
+    print("__NO_TK__"); sys.exit(0)
+initial = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else None
+try:
+    root = tk.Tk(); root.withdraw()
+    try:
+        root.attributes("-topmost", True)
+    except Exception:
+        pass
+    path = filedialog.askdirectory(initialdir=initial, title="Choose a folder of clips")
+    root.destroy()
+except Exception:
+    print("__NO_DISPLAY__"); sys.exit(0)
+print(path or "")
+"""
+
+
+def _pick_folder(initialdir: str = "") -> str:
+    """Open the OS folder picker and return the chosen path ('' if cancelled).
+
+    Raises RuntimeError when no picker can be shown (no Tk, no display), so the
+    caller can fall back to the typed-path field with a clear message.
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _PICKER_SRC, initialdir or ""],
+            capture_output=True, text=True, timeout=600,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise RuntimeError(f"Could not open a folder picker: {exc}")
+
+    lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip() != ""]
+    last = lines[-1].strip() if lines else ""
+    if last in ("__NO_TK__", "__NO_DISPLAY__") or (proc.returncode != 0 and not last):
+        raise RuntimeError(
+            "No native folder picker is available here - type or paste the "
+            "folder path into the box instead."
+        )
+    return last  # "" when the user cancelled the dialog
 
 
 def _load(folder: str, frames: int) -> dict:
@@ -226,7 +277,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "Malformed request body."}, 400)
 
         try:
-            if self.path == "/api/load":
+            if self.path == "/api/browse":
+                result = {"path": _pick_folder(body.get("initialdir", ""))}
+            elif self.path == "/api/load":
                 result = _load(body["folder"], int(body.get("frames", 12)))
             elif self.path == "/api/preview":
                 result = _preview(
@@ -237,7 +290,8 @@ class _Handler(BaseHTTPRequestHandler):
                 result = _export(body)
             else:
                 return self._send_json({"error": "Unknown endpoint."}, 404)
-        except (ValueError, KeyError, FFmpegError, FileNotFoundError) as exc:
+        except (ValueError, KeyError, FFmpegError, FileNotFoundError,
+                RuntimeError) as exc:
             return self._send_json({"error": str(exc)}, 400)
         except Exception as exc:  # never leak a stack trace to the browser
             return self._send_json({"error": f"{type(exc).__name__}: {exc}"}, 500)
