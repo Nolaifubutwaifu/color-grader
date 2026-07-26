@@ -10,6 +10,11 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["numpy>=1.22"]
 
+[project.optional-dependencies]
+# Bundles a static ffmpeg build. Easier than a system install if you do not
+# already have ffmpeg: `pip install "colorgrader[ffmpeg]"`.
+ffmpeg = ["imageio-ffmpeg>=0.4"]
+
 [project.scripts]
 colorgrade = "colorgrader.cli:main"
 

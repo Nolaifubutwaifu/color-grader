@@ -14,22 +14,21 @@ starting point; the grade on top is still yours.
 
 ## Install
 
-Needs Python 3.9+ and ffmpeg.
+Needs Python 3.9+. Copy-paste this from the folder you cloned into:
 
 ```bash
-pip install -e .
-
-# ffmpeg, if you do not have it:
-#   macOS     brew install ffmpeg
-#   Windows   winget install Gyan.FFmpeg
-#   Linux     apt install ffmpeg
-```
-
-Check everything is wired up:
-
-```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e ".[ffmpeg]"
 colorgrade doctor
 ```
+
+`doctor` should end with **All good.** The `[ffmpeg]` part installs a bundled
+ffmpeg so you do not have to install one yourself — if you already have ffmpeg
+on your PATH, plain `pip install -e .` is enough and it will be used instead.
+
+Every later session, re-activate the environment first
+(`source .venv/bin/activate`) before running `colorgrade`.
 
 ## Use
 
